@@ -15,9 +15,7 @@ sudo apt-get install -y protobuf-compiler
 # Configurar backend
 echo "🐍 Configurando backend..."
 cd back
-uv venv
-source .venv/bin/activate
-uv pip install fastapi uvicorn msgpack-python pydantic faker python-multipart brotli-asgi zstd-asgi aiocache protobuf
+uv sync
 
 # Compilar protobuf
 echo "⚙️ Compilando protobuf..."
@@ -39,4 +37,4 @@ echo "✅ Configuración completada!"
 echo ""
 echo "Para ejecutar el proyecto:"
 echo "  Backend: cd back && source .venv/bin/activate && uvicorn main:app --reload --host 0.0.0.0"
-echo "  Frontend: cd front && npm run dev -- --host"
+echo "  Frontend: cd front && npm run dev"

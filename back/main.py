@@ -1,28 +1,17 @@
-from fastapi import FastAPI, Response, Request
-
-from fastapi.middleware.cors import CORSMiddleware
-
-from fastapi.middleware.gzip import GZipMiddleware
-
-from pydantic import BaseModel
+import concurrent.futures
+from datetime import datetime, timezone
 from functools import lru_cache
-
-
 from typing import List
 
 import msgpack
-
-from datetime import datetime, timezone
-
-from faker import Faker
 from aiocache import cached
-
-
 from brotli_asgi import BrotliMiddleware
-
+from faker import Faker
+from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from pydantic import BaseModel
 from zstd_asgi import ZstdMiddleware
-
-
 
 app = FastAPI()
 
@@ -52,7 +41,6 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 # app.add_middleware(ZstdMiddleware, level=22)
 
 
-
 # Inicializar Faker con locale español
 
 fake = Faker('es_ES')
@@ -60,7 +48,7 @@ fake = Faker('es_ES')
 
 # Modelo Pydantic para los datos
 
-class User(BaseModel):
+class User(BaseModel, frozen=True):
 
     id: int
 
@@ -73,9 +61,9 @@ class User(BaseModel):
     city: str
 
 
-class DataResponse(BaseModel):
+class DataResponse(BaseModel, frozen=True):
 
-    users: List[User]
+    users: tuple[User, ...]
 
     total: int
 
@@ -83,69 +71,96 @@ class DataResponse(BaseModel):
 
 
 # Datos mock
+def create_fake_user(i: int) -> User:
+    fake = Faker('es_ES')
+    return User(
+        id=i,
+        name=fake.name(),
+        email=fake.email(),
+        age=fake.random_int(min=18, max=65),
+        city=fake.city()
+    )
+
 
 @cached()
 async def get_mock_data() -> DataResponse:
-
+    print("GET USERS...")
     users = []
-    jls_extract_var = 5000
-    for i in range(1, jls_extract_var):
-        print(i)
-        users.append(User(
+    total_users = 5000
+    user_ids = range(1, total_users + 1)
 
-            id=i,
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        users = list(executor.map(create_fake_user, user_ids))
+    # for i in range(1, total_users):
+    #     print(i)
+    #     users.append(User(
 
-            name=fake.name(),
+    #         id=i,
 
-            email=fake.email(),
+    #         name=fake.name(),
 
-            age=fake.random_int(min=18, max=65),
+    #         email=fake.email(),
 
-            city=fake.city()
-        ))
+    #         age=fake.random_int(min=18, max=65),
 
+    #         city=fake.city()
+    #     ))
 
     return DataResponse(
 
-        users=users,
+        users=tuple(users),
 
-        total=500,
+        total=total_users,
 
         timestamp=datetime.now(timezone.utc).isoformat()
     )
 
 
 async def get_data_json(data: DataResponse):
-
     """Endpoint que retorna datos serializados en msgpack"""
 
     return data
 
 
 @app.get("/data")
-
 async def get_data(request: Request):
 
     accept_header = request.headers.get("accept", "")
 
     data = await get_mock_data()
 
+    etag = str(hash(data))
+
+    print(etag)
 
     if "application/x-msgpack" in accept_header:
 
-        return await get_data_msgpack(data)
+        response = await get_data_msgpack(data)
 
     elif "application/x-protobuf" in accept_header:
 
-        return await get_data_protobuf(data)
+        response = await get_data_protobuf(data)
 
     else:
 
-        return await get_data_json(data)
+        response = await get_data_json(data)
+
+    # response.headers[""]
+
+    if_none_match = request.headers.get("if-none-match")
+    if_modified_since = request.headers.get("if-modified-since")
+
+    if data.timestamp == if_modified_since or if_none_match == etag:
+        return Response(status_code=304, headers={"Cache-Control": "private, max-age=300"})
+
+    # Privado y fresco por 300 segundos (5 minutos)
+    response.headers["Cache-Control"] = "private, max-age=30"
+    response.headers["Last-Modified"] = data.timestamp
+    response.headers["ETag"] = etag
+    return response
 
 
 async def get_data_msgpack(data: DataResponse):
-
     """Endpoint que retorna datos serializados en msgpack"""
 
     # data = get_mock_data()
@@ -154,7 +169,6 @@ async def get_data_msgpack(data: DataResponse):
     data_dict = data.model_dump()
 
     msgpack_data = msgpack.packb(data_dict)
-
 
     # Retornar con el content-type apropiado
 
@@ -167,7 +181,6 @@ async def get_data_msgpack(data: DataResponse):
 
 
 async def get_data_protobuf(data: DataResponse):
-
     """Endpoint que retorna datos serializados en protobuf"""
 
     try:
@@ -183,16 +196,13 @@ async def get_data_protobuf(data: DataResponse):
             status_code=500
         )
 
-
     # data = get_mock_data()
-
 
     # Crear mensaje protobuf
 
     proto_response = data_pb2.DataResponse()
     proto_response.total = data.total
     proto_response.timestamp = data.timestamp
-
 
     for user in data.users:
         proto_user = proto_response.users.add()
@@ -203,11 +213,9 @@ async def get_data_protobuf(data: DataResponse):
 
         proto_user.city = user.city
 
-
     # Serializar a bytes
 
     protobuf_data = proto_response.SerializeToString()
-
 
     return Response(
 
@@ -218,8 +226,6 @@ async def get_data_protobuf(data: DataResponse):
 
 
 @app.get("/")
-
 async def root():
 
     return {"message": "Backend FastAPI con MessagePack"}
-

@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
-import axios from 'axios'
 import { decode } from '@msgpack/msgpack'
+import axios from 'axios'
 import * as protobuf from 'protobufjs'
+import { useEffect, useState } from 'react'
 import './App.css'
 
 interface User {
@@ -23,6 +23,10 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const [ETag, setETag] = useState<string | null>(null)
+  const [lastModified, setLastModified] = useState<string | null>(null);
+
+
   const fetchDataMsgPack = async () => {
     setLoading(true)
     setError(null)
@@ -31,9 +35,17 @@ function App() {
       const response = await axios.get('http://localhost:8000/data', {
         headers: {
           Accept: 'application/x-msgpack',
+          "If-None-Match": ETag ? ETag : '',
+          'If-Modified-Since': lastModified ? lastModified : '',
         },
         responseType: 'arraybuffer'
       })
+
+      const newETag = response.headers['etag'];
+      const newLastModified = response.headers['last-modified'];
+
+      if (newETag) setETag(newETag);
+      if (newLastModified) setLastModified(newLastModified);
 
       // Deserializar los datos msgpack
       const decoded = decode(new Uint8Array(response.data)) as DataResponse
@@ -54,8 +66,15 @@ function App() {
       const response = await axios.get<DataResponse>('http://localhost:8000/data', {
         headers: {
           Accept: 'application/json',
+          "If-None-Match": ETag ? ETag : '',
+          'If-Modified-Since': lastModified ? lastModified : '',
         },
       })
+      const newETag = response.headers['etag'];
+      const newLastModified = response.headers['last-modified'];
+
+      if (newETag) setETag(newETag);
+      if (newLastModified) setLastModified(newLastModified);
       setData(response.data)
     } catch (err) {
       setError('Error al obtener los datos. Asegúrate de que el backend esté ejecutándose.')
@@ -83,9 +102,16 @@ function App() {
       const response = await axios.get('http://localhost:8000/data', {
         headers: {
           Accept: 'application/x-protobuf',
+          "If-None-Match": ETag ? ETag : '',
+          'If-Modified-Since': lastModified ? lastModified : '',
         },
         responseType: 'arraybuffer'
       })
+      const newETag = response.headers['etag'];
+      const newLastModified = response.headers['last-modified'];
+
+      if (newETag) setETag(newETag);
+      if (newLastModified) setLastModified(newLastModified);
 
       // Deserializar los datos protobuf
       const message = DataResponse.decode(new Uint8Array(response.data))
